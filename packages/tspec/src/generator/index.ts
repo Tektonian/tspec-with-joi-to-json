@@ -11,6 +11,8 @@ import * as TJS from 'typescript-json-schema';
 import { Tspec } from '../types/tspec';
 import { assertIsDefined, isDefined } from '../utils/types';
 
+import { exec } from 'child_process';
+
 import { getOpenapiPaths } from './openapiGenerator';
 import { convertToOpenapiSchemas } from './openapiSchemaConverter';
 import { SchemaMapping } from './types';
@@ -24,6 +26,88 @@ const isNodeExported = (node: ts.Node): boolean => (
   (ts.getCombinedModifierFlags(node as ts.Declaration) & ts.ModifierFlags.Export) !== 0
   || (!!node.parent && node.parent.kind === ts.SyntaxKind.SourceFile)
 );
+
+const getMappingOfJoiJsonSchema = (p: ts.Program) => {
+  const entryPoints = p
+      .getRootFileNames()
+      .map((entryPointName) => p.getSourceFile(entryPointName)).filter(isDefined);
+
+  const JsonSchemaMap: Map<string, string> = new Map();
+  const filenameMap: Map<string, string> = new Map();
+
+  entryPoints.forEach((srcFile) => {
+    srcFile.forEachChild((node) => {
+
+      if (!isNodeExported(node)){
+        return;
+      }
+
+      // We expect following statements
+      // e.g. const JoiSchemaJson = parse(JoiSchema);
+      if(!(node as any).declarationList || !(node as any).flowNode?.node){
+        return;
+      }
+
+      const declared = (node as any).declarationList.declarations.at(0);
+      const initial = declared.initializer
+      if(initial.expression?.escapedText !== 'parse'){
+        return;
+      }
+
+      const name = declared.name.escapedText;
+      const argumentName = initial.arguments.at(0).escapedText;
+      JsonSchemaMap.set(argumentName, name);
+      filenameMap.set(name, srcFile.fileName)
+      console.log("declare", declared)
+      console.log("init", initial)
+    })
+  })
+  return {JsonSchemaMap, filenameMap};
+}
+
+const getMappingOfJoiExtractTypeSignatures = (p: ts.Program) => {
+  const entryPoints = p
+      .getRootFileNames()
+      .map((entryPointName) => p.getSourceFile(entryPointName)).filter(isDefined);
+
+  const namesMap: Map<string, string> = new Map();
+
+  entryPoints.forEach((srcFile) => {
+    srcFile.forEachChild((node) => {
+
+
+      if (!isNodeExported(node)) {
+        return;
+      }
+      // Mapping `interface XXX extends Joi.extractType<typeof XXXSchema>`
+
+      // NOTE(hyeonseong): typescript 5.0 changed node kind of type alias declaration.
+      // if (
+      //   !ts.isTypeAliasDeclaration(node)
+      //   || !ts.isTypeReferenceNode(node.type)
+      // ) {
+      //   return;
+      // }
+
+      if ((node as any).heritageClauses?.at(0)?.types.at(0).expression?.name?.escapedText !== 'extractType') {
+        return;
+      }
+      const name = (node as any).name.escapedText as string;
+      if (namesMap.has(name)) {
+        throw new Error(`Duplicate name: ${name}`);
+      }
+
+      const argument = (node as any).heritageClauses?.at(0)?.types.at(0)?.typeArguments?.at(0)
+      if(!argument){
+        return;
+      }
+      const value = argument.exprName.escapedText;
+      namesMap.set(name, value)
+    });
+  });
+
+  return namesMap;
+};
 
 const getTspecSignatures = (p: ts.Program) => {
   const entryPoints = p
@@ -44,7 +128,6 @@ const getTspecSignatures = (p: ts.Program) => {
       // ) {
       //   return;
       // }
-
       if ((node as any).type?.typeName?.right?.escapedText !== 'DefineApiSpec') {
         return;
       }
@@ -139,10 +222,18 @@ const getOpenapiSchemas = async (
   const { definitions: jsonSchemas } = generator.getSchemaForSymbols(tspecSymbols);
   assertIsDefined(jsonSchemas);
   DEBUG({ schemaKeys: Object.keys(jsonSchemas) });
-
   const openapiSchemas = await convertToOpenapiSchemas(jsonSchemas);
 
-  return { openapiSchemas, tspecSymbols };
+  const JoiObjectMap = getMappingOfJoiExtractTypeSignatures(program as ts.Program);
+  const {JsonSchemaMap, filenameMap} = getMappingOfJoiJsonSchema(program as ts.Program)
+  // Example
+  //  Map(1) { 'ReqSearchSchool' => 'ReqSearchSchoolScheme' }
+  //  Map(1) { 'ReqSearchSchoolScheme' => 'ReqSearchSchoolSchemeJson' }
+  DEBUG(JoiObjectMap)
+  DEBUG(JsonSchemaMap)
+  DEBUG(filenameMap)
+
+  return { openapiSchemas, tspecSymbols, JoiObjectMap, JsonSchemaMap, filenameMap };
 };
 
 const getOpenapiSchemasOnly = (openapiSchemas: SchemaMapping, tspecSymbols: string[]) => {
@@ -202,6 +293,54 @@ const getGenerateTspecParams = async (
   return mergeDeep(defaultGenerateParams, overrideParams);
 };
 
+const createScript = async (
+  JoiObjectMap: Map<string, string>, 
+  JsonSchemaMap: Map<string, string>, 
+  fileNameMap: Map<string,string>,
+  filePath: string,
+) => {
+  const importFiles: string [] = [];
+  const replaceMap: Map<string, string> = new Map();
+  DEBUG(JoiObjectMap)
+
+  JoiObjectMap.forEach((val, key) => {
+    const ret = JsonSchemaMap.get(val);
+    DEBUG(ret)
+    DEBUG(JsonSchemaMap)
+    if(ret){
+      importFiles.push(ret);
+      replaceMap.set(ret, key)
+    }
+  })
+  
+  const importStr = importFiles.reduce((prev, cur) => {
+    return prev + `import {${cur}}from '${fileNameMap.get(cur)}' \n`
+  }, '')
+  
+  DEBUG(importStr)
+
+  const funcStr = `
+  const json = JSON.parse(fs.readFileSync('${filePath}', 'utf-8'))
+  `
+
+
+  const jsonStr = importFiles.reduce((prev, cur) => {
+    return prev + `json.components.schemas['${replaceMap.get(cur)}'] = ${cur}\n`
+  },'')
+
+  
+
+
+  await fs.writeFile("script.ts", 
+    `import fs from 'fs' \n` +
+    importStr +
+    funcStr +
+    jsonStr +
+    `fs.writeFileSync('${filePath}', JSON.stringify(json, undefined, '\t'));`
+  )
+
+}
+
 export const createJsonFile = async (filePath: string, json: any) => {
   await fs.mkdir(dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, JSON.stringify(json, null, 2));
@@ -213,7 +352,7 @@ export const generateTspec = async (
   const params = await getGenerateTspecParams(generateParams);
 
   const {
-    openapiSchemas, tspecSymbols,
+    openapiSchemas, tspecSymbols, JoiObjectMap, JsonSchemaMap, filenameMap
   } = await getOpenapiSchemas(
     params.tsconfigPath || 'tsconfig.json',
     params.specPathGlobs,
@@ -240,6 +379,7 @@ export const generateTspec = async (
 
   if (params.outputPath) {
     await createJsonFile(params.outputPath, openapi);
+    await createScript(JoiObjectMap, JsonSchemaMap, filenameMap, params.outputPath)
   }
 
   return openapi;

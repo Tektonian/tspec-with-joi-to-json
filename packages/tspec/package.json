@@ -27,9 +27,6 @@
     "rollup-plugin-dts": "^6.1.1",
     "tsx": "^3.12.7"
   },
-  "peerDependencies": {
-    "express": "^4.17.1"
-  },
   "scripts": {
     "start": "tsx src/index.ts",
     "build": "concurrently npm:build:*",
@@ -39,9 +36,9 @@
   },
   "dependencies": {
     "debug": "^4.3.4",
-    "express": "^4.18.2",
     "glob": "^8.1.0",
     "http-proxy-middleware": "^2.0.6",
+    "joi-to-json": "^4.3.0",
     "json-schema-to-openapi-schema": "^0.4.0",
     "openapi-types": "^12.0.2",
     "swagger-ui-express": "^4.6.2",
@@ -87,5 +84,8 @@
     "node.js",
     "generation",
     "express"
-  ]
+  ],
+  "peerDependencies": {
+    "express": "^5.0.1"
+  }
 }
