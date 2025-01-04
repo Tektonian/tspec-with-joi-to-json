@@ -27,6 +27,7 @@ interface GeneratorOptions {
   openapiDescription?: string,
   debug?: boolean,
   ignoreErrors?: boolean,
+  applyScript?: boolean,
 }
 
 interface RunServerOptions extends GeneratorOptions {
@@ -45,6 +46,7 @@ const baseOptions = {
   openapiDescription: { type: 'string', default: defaultArgs.openapi.description },
   debug: { type: 'boolean', default: defaultArgs.debug },
   ignoreErrors: { type: 'boolean', default: defaultArgs.ignoreErrors },
+  applyScript: { type: 'boolean', default: defaultArgs.applyScript },
 } as const;
 
 const generatorOptions = {

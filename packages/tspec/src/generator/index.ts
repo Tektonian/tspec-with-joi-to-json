@@ -278,6 +278,7 @@ export const defaultGenerateParams = {
   },
   debug: false,
   ignoreErrors: true,
+  applyScript: true
 } satisfies Tspec.GenerateParams;
 
 const getGenerateTspecParams = async (
@@ -346,6 +347,11 @@ export const createJsonFile = async (filePath: string, json: any) => {
   await fs.writeFile(filePath, JSON.stringify(json, null, 2));
 }
 
+export const applyScript = () => {
+    exec('npx tsx script.ts')
+    return;
+}
+
 export const generateTspec = async (
   generateParams: Tspec.GenerateParams = {},
 ): Promise<OpenAPIV3.Document> => {
@@ -380,6 +386,9 @@ export const generateTspec = async (
   if (params.outputPath) {
     await createJsonFile(params.outputPath, openapi);
     await createScript(JoiObjectMap, JsonSchemaMap, filenameMap, params.outputPath)
+    if (params.applyScript){
+      applyScript();
+    }
   }
 
   return openapi;

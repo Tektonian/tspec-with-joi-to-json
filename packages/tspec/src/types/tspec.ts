@@ -121,6 +121,7 @@ export namespace Tspec {
     },
     debug?: boolean,
     ignoreErrors?: boolean,
+    applyScript?: boolean,
   }
 
   export interface InitTspecServerOptions extends GenerateParams {
