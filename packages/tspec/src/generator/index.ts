@@ -27,7 +27,7 @@ const isNodeExported = (node: ts.Node): boolean => (
   || (!!node.parent && node.parent.kind === ts.SyntaxKind.SourceFile)
 );
 
-const getMappingOfJoiJsonSchema = (p: ts.Program) => {
+const getMappingOfZoiJsonSchema = (p: ts.Program) => {
   const entryPoints = p
       .getRootFileNames()
       .map((entryPointName) => p.getSourceFile(entryPointName)).filter(isDefined);
@@ -43,14 +43,14 @@ const getMappingOfJoiJsonSchema = (p: ts.Program) => {
       }
 
       // We expect following statements
-      // e.g. const JoiSchemaJson = parse(JoiSchema);
+      // e.g. const JoiSchemaJson = zodToJsonSchema(ZodSchema);
       if(!(node as any).declarationList || !(node as any).flowNode?.node){
         return;
       }
 
       const declared = (node as any).declarationList.declarations.at(0);
       const initial = declared.initializer
-      if(initial.expression?.escapedText !== 'parse'){
+      if(initial.expression?.escapedText !== 'zodToJsonSchema'){
         return;
       }
 
@@ -79,7 +79,7 @@ const getMappingOfJoiExtractTypeSignatures = (p: ts.Program) => {
       if (!isNodeExported(node)) {
         return;
       }
-      // Mapping `interface XXX extends Joi.extractType<typeof XXXSchema>`
+      // Mapping `interface XXX extends z.infer<typeof XXXSchema>`
 
       // NOTE(hyeonseong): typescript 5.0 changed node kind of type alias declaration.
       // if (
@@ -89,7 +89,7 @@ const getMappingOfJoiExtractTypeSignatures = (p: ts.Program) => {
       //   return;
       // }
 
-      if ((node as any).heritageClauses?.at(0)?.types.at(0).expression?.name?.escapedText !== 'extractType') {
+      if ((node as any).heritageClauses?.at(0)?.types.at(0).expression?.name?.escapedText !== 'infer') {
         return;
       }
       const name = (node as any).name.escapedText as string;
@@ -225,7 +225,7 @@ const getOpenapiSchemas = async (
   const openapiSchemas = await convertToOpenapiSchemas(jsonSchemas);
 
   const JoiObjectMap = getMappingOfJoiExtractTypeSignatures(program as ts.Program);
-  const {JsonSchemaMap, filenameMap} = getMappingOfJoiJsonSchema(program as ts.Program)
+  const {JsonSchemaMap, filenameMap} = getMappingOfZoiJsonSchema(program as ts.Program)
   // Example
   //  Map(1) { 'ReqSearchSchool' => 'ReqSearchSchoolScheme' }
   //  Map(1) { 'ReqSearchSchoolScheme' => 'ReqSearchSchoolSchemeJson' }
